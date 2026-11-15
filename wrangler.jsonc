@@ -5,5 +5,13 @@
   "compatibility_date": "2026-11-15",
   "vars": {
     "TOPVISOR_USER_ID": "278724"
-  }
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "codex-mcp-data",
+      "database_id": "d43429e5-aeea-4506-b839-4fe60a20a74c",
+      "migrations_dir": "migrations"
+    }
+  ]
 }

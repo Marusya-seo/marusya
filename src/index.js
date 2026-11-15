@@ -46,7 +46,7 @@ function createServer(env) {
           ...(includeSummary ? { include_positions_summary: 1 } : {}),
         }),
       });
-      return responseToolResult(response, "Topvisor");
+      return responseToolResult(response, "Topvisor", env, "topvisor_list_projects", { limit, includeSummary });
     },
   );
 
@@ -68,7 +68,7 @@ function createServer(env) {
         format: "json",
         json_type: "array",
       }).toString();
-      return responseToolResult(await fetch(url), "Bukvarix");
+      return responseToolResult(await fetch(url), "Bukvarix", env, "bukvarix_keyword_search", { query, limit });
     },
   );
 
@@ -99,6 +99,9 @@ function createServer(env) {
           body: body.toString(),
         }),
         "Bukvarix",
+        env,
+        "bukvarix_multi_keyword_search",
+        { queries, exclude, limit },
       );
     },
   );
@@ -110,12 +113,29 @@ function toolError(message) {
   return { isError: true, content: [{ type: "text", text: message }] };
 }
 
-async function responseToolResult(response, service) {
+async function responseToolResult(response, service, env, toolName, params) {
   const text = await response.text();
   if (!response.ok) {
     return toolError(`${service} вернул HTTP ${response.status}: ${text.slice(0, 1500)}`);
   }
-  return { content: [{ type: "text", text: text.slice(0, 20000) }] };
+
+  const storedText = text.slice(0, 50000);
+  try {
+    await env.DB.prepare(
+      "INSERT INTO api_query_history (provider, tool_name, params_json, result_json, truncated) VALUES (?, ?, ?, ?, ?)",
+    )
+      .bind(service, toolName, JSON.stringify(params), storedText, Number(text.length > storedText.length))
+      .run();
+  } catch (error) {
+    console.error("D1 history write failed:", error);
+  }
+
+  return {
+    content: [{
+      type: "text",
+      text: `${text.slice(0, 20000)}${text.length > 20000 ? "\n\n[Ответ сокращён для чата; в D1 сохранено до 50 000 символов.]" : ""}`,
+    }],
+  };
 }
 
 export default {
