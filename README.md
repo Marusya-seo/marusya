@@ -1,6 +1,15 @@
 # marusya
 
-Удалённый MCP-сервер на Cloudflare Workers. Сейчас доступен инструмент `hello`; здесь можно добавлять инструменты для вызова внешних API.
+Удалённый MCP-сервер на Cloudflare Workers.
+
+## Инструменты
+
+- `hello` — проверка подключения.
+- `topvisor_list_projects` — список проектов Topvisor (нужны `TOPVISOR_USER_ID` и Secret `TOPVISOR_API_KEY`).
+- `bukvarix_keyword_search` — поиск по одной фразе в Bukvarix.
+- `bukvarix_multi_keyword_search` — поиск по списку фраз в Bukvarix.
+
+Bukvarix по умолчанию использует бесплатный API (`api_key=free`). Платный ключ можно задать как Secret `BUKVARIX_API_KEY`.
 
 ## Разработка
 
@@ -10,6 +19,8 @@ npm.cmd run dev
 ```
 
 Локальная точка подключения MCP: `http://localhost:8787/mcp`.
+
+Для локального Topvisor задайте `TOPVISOR_API_KEY` в `.dev.vars` и не добавляйте этот файл в Git.
 
 ## Деплой
 
