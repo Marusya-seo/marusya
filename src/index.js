@@ -162,7 +162,16 @@ async function registerPrCyTools(server, env) {
 
 async function withPrCyClient(env, action) {
   if (!env.PRCY_API_KEY) throw new Error("PRCY_API_KEY is not configured");
-  const client = new Client({ name: "codex-mcp-worker", version: "0.1.0" });
+  const client = new Client(
+    { name: "codex-mcp-worker", version: "0.1.0" },
+    {
+      // PR-CY publishes valid tool schemas that the SDK's Ajv compiler currently rejects.
+      // The proxy forwards the schemas to the model and validates MCP transport envelopes.
+      jsonSchemaValidator: {
+        getValidator: () => (data) => ({ valid: true, data, errorMessage: undefined }),
+      },
+    },
+  );
   const transport = new StreamableHTTPClientTransport(
     new URL("https://mcp-server.pr-cy.ru/mcp/"),
     { requestInit: { headers: { Authorization: `Bearer ${env.PRCY_API_KEY}` } } },
