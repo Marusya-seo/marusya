@@ -219,6 +219,25 @@ async function saveHistory(env, service, toolName, params, result) {
 
 export default {
   async fetch(request, env, ctx) {
+    if (!env.MCP_API_KEY) {
+      return new Response("MCP API key is not configured.", { status: 503 });
+    }
+    const suppliedToken = request.headers.get("Authorization")?.replace(/^Bearer\s+/i, "") ?? "";
+    if (!constantTimeEquals(suppliedToken, env.MCP_API_KEY)) {
+      return new Response("Unauthorized", {
+        status: 401,
+        headers: { "WWW-Authenticate": "Bearer" },
+      });
+    }
     return createMcpHandler(await createServer(env))(request, env, ctx);
   },
 };
+
+function constantTimeEquals(left, right) {
+  if (left.length !== right.length) return false;
+  let difference = 0;
+  for (let index = 0; index < left.length; index += 1) {
+    difference |= left.charCodeAt(index) ^ right.charCodeAt(index);
+  }
+  return difference === 0;
+}
