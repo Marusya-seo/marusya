@@ -1,8 +1,10 @@
 import { createMcpHandler } from "agents/mcp";
 import { McpServer } from "@modelcontextprotocol/server";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { z } from "zod";
 
-function createServer(env) {
+async function createServer(env) {
   const server = new McpServer({
     name: "codex-mcp-worker",
     version: "0.1.0",
@@ -18,6 +20,27 @@ function createServer(env) {
       content: [{ type: "text", text: `Привет, ${name ?? "мир"}! MCP-сервер работает.` }],
     }),
   );
+
+  server.registerTool(
+    "prcy_connection_status",
+    {
+      description: "Показывает, настроен ли доступ к PR-CY MCP; значение ключа не раскрывает.",
+    },
+    async () => ({
+      content: [{
+        type: "text",
+        text: env.PRCY_API_KEY
+          ? "Секрет PRCY_API_KEY доступен Worker."
+          : "Нет секрета PRCY_API_KEY в настройках Worker.",
+      }],
+    }),
+  );
+
+  if (env.PRCY_API_KEY) {
+    await registerPrCyTools(server, env).catch((error) => {
+      console.error("PR-CY tool discovery failed:", error);
+    });
+  }
 
   server.registerTool(
     "topvisor_list_projects",
@@ -109,6 +132,49 @@ function createServer(env) {
   return server;
 }
 
+async function registerPrCyTools(server, env) {
+  const tools = await withPrCyClient(env, (client) => client.listTools());
+  for (const tool of tools.tools ?? []) {
+    const exposedName = `prcy_${tool.name.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 50)}`;
+    const schemaDescription = tool.inputSchema
+      ? `\nInput JSON Schema: ${JSON.stringify(tool.inputSchema)}`
+      : "";
+    server.registerTool(
+      exposedName,
+      {
+        description: `${tool.description || tool.name}${schemaDescription}`,
+        inputSchema: { arguments: z.record(z.string(), z.unknown()).optional() },
+      },
+      async ({ arguments: args = {} }) => {
+        const result = await withPrCyClient(env, (client) =>
+          client.callTool({ name: tool.name, arguments: args }),
+        );
+        const serialized = JSON.stringify(result);
+        await saveHistory(env, "PR-CY", exposedName, args, serialized);
+        return {
+          content: [{ type: "text", text: serialized.slice(0, 20000) }],
+          ...(result.isError ? { isError: true } : {}),
+        };
+      },
+    );
+  }
+}
+
+async function withPrCyClient(env, action) {
+  if (!env.PRCY_API_KEY) throw new Error("PRCY_API_KEY is not configured");
+  const client = new Client({ name: "codex-mcp-worker", version: "0.1.0" });
+  const transport = new StreamableHTTPClientTransport(
+    new URL("https://mcp-server.pr-cy.ru/mcp/"),
+    { requestInit: { headers: { Authorization: `Bearer ${env.PRCY_API_KEY}` } } },
+  );
+  await client.connect(transport);
+  try {
+    return await action(client);
+  } finally {
+    await client.close();
+  }
+}
+
 function toolError(message) {
   return { isError: true, content: [{ type: "text", text: message }] };
 }
@@ -119,16 +185,7 @@ async function responseToolResult(response, service, env, toolName, params) {
     return toolError(`${service} вернул HTTP ${response.status}: ${text.slice(0, 1500)}`);
   }
 
-  const storedText = text.slice(0, 50000);
-  try {
-    await env.DB.prepare(
-      "INSERT INTO api_query_history (provider, tool_name, params_json, result_json, truncated) VALUES (?, ?, ?, ?, ?)",
-    )
-      .bind(service, toolName, JSON.stringify(params), storedText, Number(text.length > storedText.length))
-      .run();
-  } catch (error) {
-    console.error("D1 history write failed:", error);
-  }
+  await saveHistory(env, service, toolName, params, text);
 
   return {
     content: [{
@@ -138,8 +195,21 @@ async function responseToolResult(response, service, env, toolName, params) {
   };
 }
 
+async function saveHistory(env, service, toolName, params, result) {
+  const storedText = String(result).slice(0, 50000);
+  try {
+    await env.DB.prepare(
+      "INSERT INTO api_query_history (provider, tool_name, params_json, result_json, truncated) VALUES (?, ?, ?, ?, ?)",
+    )
+      .bind(service, toolName, JSON.stringify(params), storedText, Number(String(result).length > storedText.length))
+      .run();
+  } catch (error) {
+    console.error("D1 history write failed:", error);
+  }
+}
+
 export default {
-  fetch(request, env, ctx) {
-    return createMcpHandler(createServer(env))(request, env, ctx);
+  async fetch(request, env, ctx) {
+    return createMcpHandler(await createServer(env))(request, env, ctx);
   },
 };
